@@ -1,0 +1,1445 @@
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <title>Arc RPC Status</title>
+
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: #08090c;
+      color: #f5f7fa;
+      font-family:
+        Inter,
+        system-ui,
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        sans-serif;
+    }
+
+    .container {
+      width: min(1050px, calc(100% - 32px));
+      margin: 55px auto;
+    }
+
+    /* HEADER */
+
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 28px;
+    }
+
+    .title {
+      display: flex;
+      align-items: center;
+      gap: 13px;
+    }
+
+    .logo {
+      width: 44px;
+      height: 44px;
+      border-radius: 12px;
+      background: #ffffff;
+      color: #000000;
+      display: grid;
+      place-items: center;
+      font-weight: 900;
+      font-size: 18px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 22px;
+      letter-spacing: -0.3px;
+    }
+
+    .subtitle {
+      color: #777e89;
+      font-size: 13px;
+      margin-top: 3px;
+    }
+
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      font-size: 13px;
+      color: #8d939e;
+    }
+
+    .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: #555;
+    }
+
+    .dot.online {
+      background: #3ddc84;
+      box-shadow: 0 0 12px rgba(61, 220, 132, 0.8);
+    }
+
+    .dot.offline {
+      background: #ff4d67;
+      box-shadow: 0 0 12px rgba(255, 77, 103, 0.8);
+    }
+
+    /* HERO */
+
+    .hero {
+      background:
+        linear-gradient(
+          135deg,
+          #111318,
+          #0c0e12
+        );
+
+      border: 1px solid #1e222a;
+      border-radius: 18px;
+      padding: 28px;
+      margin-bottom: 14px;
+    }
+
+    .hero-label {
+      color: #777e89;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      margin-bottom: 8px;
+    }
+
+    .block {
+      font-size: 44px;
+      font-weight: 800;
+      letter-spacing: -1.5px;
+    }
+
+    .block-meta {
+      margin-top: 8px;
+      color: #777e89;
+      font-size: 13px;
+    }
+
+    /* GRID */
+
+    .grid {
+      display: grid;
+      grid-template-columns:
+        repeat(3, minmax(0, 1fr));
+
+      gap: 12px;
+    }
+
+    .card {
+      background: #101217;
+      border: 1px solid #1d2027;
+      border-radius: 15px;
+      padding: 20px;
+      min-height: 115px;
+    }
+
+    .label {
+      color: #777e89;
+      font-size: 12px;
+      margin-bottom: 10px;
+    }
+
+    .value {
+      font-size: 20px;
+      font-weight: 700;
+      word-break: break-word;
+    }
+
+    .small {
+      font-size: 12px;
+      color: #666d78;
+      margin-top: 5px;
+    }
+
+    /* RPC */
+
+    .rpc-card {
+      margin-top: 12px;
+      background: #101217;
+      border: 1px solid #1d2027;
+      border-radius: 15px;
+      padding: 20px;
+    }
+
+    .rpc-url {
+      font-family: monospace;
+      color: #dce1e8;
+      word-break: break-all;
+      font-size: 14px;
+    }
+
+    /* WALLET */
+
+    .wallet-section {
+      margin-top: 28px;
+    }
+
+    .section-title {
+      font-size: 15px;
+      font-weight: 700;
+      margin-bottom: 12px;
+    }
+
+    .wallet-input {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    input {
+      flex: 1;
+      min-width: 0;
+
+      background: #101217;
+      border: 1px solid #242832;
+      color: #ffffff;
+
+      border-radius: 12px;
+
+      padding: 14px 15px;
+
+      outline: none;
+
+      font-family: monospace;
+      font-size: 14px;
+
+      transition: border .15s ease;
+    }
+
+    input:focus {
+      border-color: #454c58;
+    }
+
+    button {
+      border: 1px solid #292e37;
+      background: #171a20;
+      color: #ffffff;
+
+      padding: 0 20px;
+
+      border-radius: 12px;
+
+      cursor: pointer;
+
+      font-weight: 600;
+
+      transition:
+        background .15s ease,
+        border .15s ease;
+    }
+
+    button:hover {
+      background: #1d2128;
+      border-color: #383e49;
+    }
+
+    .wallet-status {
+      font-size: 12px;
+      color: #777e89;
+      min-height: 18px;
+      margin-bottom: 12px;
+    }
+
+    .wallet-grid {
+      display: grid;
+      grid-template-columns:
+        repeat(3, minmax(0, 1fr));
+
+      gap: 12px;
+    }
+
+    .balance-card {
+      grid-column: span 2;
+
+      background:
+        linear-gradient(
+          135deg,
+          #11151a,
+          #0d1014
+        );
+
+      border: 1px solid #242a32;
+
+      border-radius: 15px;
+
+      padding: 22px;
+    }
+
+    .balance {
+      font-size: 30px;
+      font-weight: 800;
+      letter-spacing: -0.8px;
+    }
+
+    .balance-symbol {
+      font-size: 14px;
+      color: #777e89;
+      font-weight: 600;
+      margin-left: 4px;
+    }
+
+    /* LATENCY */
+
+    .latency-good {
+      color: #3ddc84;
+    }
+
+    .latency-medium {
+      color: #ffd166;
+    }
+
+    .latency-bad {
+      color: #ff647c;
+    }
+
+    /* FOOTER */
+
+    .footer {
+      margin-top: 18px;
+      color: #555b66;
+      font-size: 12px;
+
+      display: flex;
+      justify-content: space-between;
+    }
+
+    /* MOBILE */
+
+    @media (max-width: 700px) {
+
+      .grid,
+      .wallet-grid {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .balance-card {
+        grid-column: span 2;
+      }
+
+      .block {
+        font-size: 34px;
+      }
+
+      .header {
+        align-items: flex-start;
+        gap: 15px;
+      }
+    }
+
+    @media (max-width: 500px) {
+
+      .grid,
+      .wallet-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .balance-card {
+        grid-column: span 1;
+      }
+
+      .wallet-input {
+        flex-direction: column;
+      }
+
+      button {
+        height: 45px;
+      }
+
+      .container {
+        margin: 30px auto;
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+<div class="container">
+
+  <!-- HEADER -->
+
+  <div class="header">
+
+    <div class="title">
+
+      <div class="logo">
+        A
+      </div>
+
+      <div>
+        <h1>Arc RPC Status</h1>
+
+        <div class="subtitle">
+          Mainnet RPC & Wallet Monitor
+        </div>
+      </div>
+
+    </div>
+
+    <div class="status">
+
+      <div id="statusDot" class="dot"></div>
+
+      <span id="statusText">
+        Checking...
+      </span>
+
+    </div>
+
+  </div>
+
+
+  <!-- CURRENT BLOCK -->
+
+  <div class="hero">
+
+    <div class="hero-label">
+      Current Block
+    </div>
+
+    <div id="blockNumber" class="block">
+      —
+    </div>
+
+    <div id="blockMeta" class="block-meta">
+      Waiting for RPC...
+    </div>
+
+  </div>
+
+
+  <!-- NETWORK INFO -->
+
+  <div class="grid">
+
+    <div class="card">
+
+      <div class="label">
+        Chain ID
+      </div>
+
+      <div id="chainId" class="value">
+        —
+      </div>
+
+      <div class="small">
+        Expected: 5042
+      </div>
+
+    </div>
+
+
+    <div class="card">
+
+      <div class="label">
+        RPC Latency
+      </div>
+
+      <div id="latency" class="value">
+        —
+      </div>
+
+      <div class="small">
+        eth_blockNumber
+      </div>
+
+    </div>
+
+
+    <div class="card">
+
+      <div class="label">
+        Block Time
+      </div>
+
+      <div id="blockTime" class="value">
+        —
+      </div>
+
+      <div class="small">
+        Latest block timestamp
+      </div>
+
+    </div>
+
+
+    <div class="card">
+
+      <div class="label">
+        Block Rate
+      </div>
+
+      <div id="blockRate" class="value">
+        —
+      </div>
+
+      <div class="small">
+        Blocks / minute
+      </div>
+
+    </div>
+
+
+    <div class="card">
+
+      <div class="label">
+        Gas Price
+      </div>
+
+      <div id="gasPrice" class="value">
+        —
+      </div>
+
+      <div class="small">
+        Network gas price
+      </div>
+
+    </div>
+
+
+    <div class="card">
+
+      <div class="label">
+        Client
+      </div>
+
+      <div id="client" class="value">
+        —
+      </div>
+
+      <div class="small">
+        web3_clientVersion
+      </div>
+
+    </div>
+
+  </div>
+
+
+  <!-- RPC -->
+
+  <div class="rpc-card">
+
+    <div class="label">
+      RPC Endpoint
+    </div>
+
+    <div class="rpc-url">
+      https://rpc.mainnet.arc.io
+    </div>
+
+  </div>
+
+
+  <!-- WALLET -->
+
+  <div class="wallet-section">
+
+    <div class="section-title">
+      Wallet Monitor
+    </div>
+
+    <div class="wallet-input">
+
+      <input
+        id="walletAddress"
+        type="text"
+        placeholder="0x..."
+        autocomplete="off"
+        spellcheck="false"
+      />
+
+      <button id="checkWallet">
+        Check
+      </button>
+
+    </div>
+
+
+    <div id="walletStatus" class="wallet-status">
+      Enter an Arc wallet address.
+    </div>
+
+
+    <div class="wallet-grid">
+
+      <!-- BALANCE -->
+
+      <div class="balance-card">
+
+        <div class="label">
+          Native Balance
+        </div>
+
+        <div>
+
+          <span id="walletBalance" class="balance">
+            —
+          </span>
+
+          <span class="balance-symbol">
+            USDC
+          </span>
+
+        </div>
+
+        <div class="small">
+          Native Arc balance
+        </div>
+
+      </div>
+
+
+      <!-- NONCE -->
+
+      <div class="card">
+
+        <div class="label">
+          Transaction Nonce
+        </div>
+
+        <div id="walletNonce" class="value">
+          —
+        </div>
+
+        <div class="small">
+          Latest transaction count
+        </div>
+
+      </div>
+
+
+      <!-- WALLET BLOCK -->
+
+      <div class="card">
+
+        <div class="label">
+          Checked At Block
+        </div>
+
+        <div id="walletBlock" class="value">
+          —
+        </div>
+
+        <div class="small">
+          Current chain height
+        </div>
+
+      </div>
+
+
+      <!-- UPDATED -->
+
+      <div class="card">
+
+        <div class="label">
+          Last Updated
+        </div>
+
+        <div id="walletUpdated" class="value">
+          —
+        </div>
+
+        <div class="small">
+          Automatic refresh
+        </div>
+
+      </div>
+
+    </div>
+
+  </div>
+
+
+  <!-- FOOTER -->
+
+  <div class="footer">
+
+    <span>
+      Polling every 2 seconds
+    </span>
+
+    <span id="lastCheck">
+      Last check: —
+    </span>
+
+  </div>
+
+</div>
+
+
+<script>
+
+const RPC =
+  "https://rpc.mainnet.arc.io";
+
+
+const EXPECTED_CHAIN_ID =
+  5042;
+
+
+/*
+ * STATE
+ */
+
+let previousBlock = null;
+let previousBlockTime = null;
+
+let walletAddress =
+  localStorage.getItem("arc_wallet") || "";
+
+let previousWalletBalance = null;
+
+
+/*
+ * DOM
+ */
+
+const walletInput =
+  document.getElementById("walletAddress");
+
+const walletStatus =
+  document.getElementById("walletStatus");
+
+
+walletInput.value =
+  walletAddress;
+
+
+/*
+ * JSON-RPC
+ */
+
+async function rpc(method, params = []) {
+
+  const start =
+    performance.now();
+
+  const response =
+    await fetch(RPC, {
+
+      method: "POST",
+
+      headers: {
+        "Content-Type":
+          "application/json"
+      },
+
+      body: JSON.stringify({
+
+        jsonrpc: "2.0",
+
+        method,
+
+        params,
+
+        id: Date.now()
+
+      })
+
+    });
+
+
+  const latency =
+    performance.now() - start;
+
+
+  if (!response.ok) {
+
+    throw new Error(
+      "HTTP " + response.status
+    );
+
+  }
+
+
+  const data =
+    await response.json();
+
+
+  if (data.error) {
+
+    throw new Error(
+      data.error.message ||
+      "RPC error"
+    );
+
+  }
+
+
+  return {
+
+    result: data.result,
+
+    latency
+
+  };
+
+}
+
+
+/*
+ * HEX
+ */
+
+function hexToNumber(hex) {
+
+  return parseInt(hex, 16);
+
+}
+
+
+/*
+ * NUMBER FORMAT
+ */
+
+function formatNumber(number) {
+
+  return Number(number)
+    .toLocaleString("en-US");
+
+}
+
+
+/*
+ * LATENCY
+ */
+
+function formatLatency(ms) {
+
+  const rounded =
+    Math.round(ms);
+
+
+  if (rounded < 150) {
+
+    return `
+      <span class="latency-good">
+        ${rounded} ms
+      </span>
+    `;
+
+  }
+
+
+  if (rounded < 400) {
+
+    return `
+      <span class="latency-medium">
+        ${rounded} ms
+      </span>
+    `;
+
+  }
+
+
+  return `
+    <span class="latency-bad">
+      ${rounded} ms
+    </span>
+  `;
+
+}
+
+
+/*
+ * ADDRESS VALIDATION
+ */
+
+function isValidAddress(address) {
+
+  return /^0x[a-fA-F0-9]{40}$/
+    .test(address);
+
+}
+
+
+/*
+ * FORMAT NATIVE USDC
+ *
+ * Arc native balance uses 18 decimals.
+ */
+
+function formatUSDC(hexBalance) {
+
+  const balance =
+    BigInt(hexBalance);
+
+
+  const decimals =
+    18n;
+
+
+  const divisor =
+    10n ** decimals;
+
+
+  const whole =
+    balance / divisor;
+
+
+  const fraction =
+    balance % divisor;
+
+
+  let fractionString =
+    fraction
+      .toString()
+      .padStart(18, "0");
+
+
+  /*
+   * Show maximum 6 decimal places
+   */
+
+  fractionString =
+    fractionString
+      .slice(0, 6)
+      .replace(/0+$/, "");
+
+
+  if (!fractionString) {
+
+    return whole.toLocaleString("en-US");
+
+  }
+
+
+  return (
+    whole.toLocaleString("en-US") +
+    "." +
+    fractionString
+  );
+
+}
+
+
+/*
+ * LOAD WALLET
+ */
+
+async function updateWallet(
+  currentBlock
+) {
+
+  if (!walletAddress) {
+
+    return;
+
+  }
+
+
+  if (!isValidAddress(walletAddress)) {
+
+    walletStatus.textContent =
+      "Invalid Ethereum / Arc address.";
+
+    return;
+
+  }
+
+
+  try {
+
+    walletStatus.textContent =
+      "Checking wallet...";
+
+
+    /*
+     * BALANCE
+     */
+
+    const balance =
+      await rpc(
+        "eth_getBalance",
+        [
+          walletAddress,
+          "latest"
+        ]
+      );
+
+
+    const formattedBalance =
+      formatUSDC(balance.result);
+
+
+    document
+      .getElementById("walletBalance")
+      .textContent =
+        formattedBalance;
+
+
+    /*
+     * NONCE
+     */
+
+    const nonce =
+      await rpc(
+        "eth_getTransactionCount",
+        [
+          walletAddress,
+          "latest"
+        ]
+      );
+
+
+    document
+      .getElementById("walletNonce")
+      .textContent =
+        hexToNumber(nonce.result);
+
+
+    /*
+     * BLOCK
+     */
+
+    document
+      .getElementById("walletBlock")
+      .textContent =
+        formatNumber(currentBlock);
+
+
+    /*
+     * UPDATED
+     */
+
+    document
+      .getElementById("walletUpdated")
+      .textContent =
+        new Date()
+          .toLocaleTimeString();
+
+
+    /*
+     * BALANCE CHANGE
+     */
+
+    if (
+      previousWalletBalance !== null &&
+      previousWalletBalance !== formattedBalance
+    ) {
+
+      walletStatus.textContent =
+        "Balance changed.";
+
+    } else {
+
+      walletStatus.textContent =
+        "Wallet is being monitored.";
+
+    }
+
+
+    previousWalletBalance =
+      formattedBalance;
+
+  }
+
+  catch (error) {
+
+    console.error(
+      "Wallet error:",
+      error
+    );
+
+
+    walletStatus.textContent =
+      "Wallet check failed: " +
+      error.message;
+
+  }
+
+}
+
+
+/*
+ * MAIN RPC UPDATE
+ */
+
+async function update() {
+
+  const statusDot =
+    document.getElementById(
+      "statusDot"
+    );
+
+
+  const statusText =
+    document.getElementById(
+      "statusText"
+    );
+
+
+  try {
+
+    /*
+     * CHAIN ID
+     */
+
+    const chain =
+      await rpc(
+        "eth_chainId"
+      );
+
+
+    const chainId =
+      hexToNumber(
+        chain.result
+      );
+
+
+    document
+      .getElementById("chainId")
+      .textContent =
+        chainId;
+
+
+    /*
+     * BLOCK
+     */
+
+    const block =
+      await rpc(
+        "eth_blockNumber"
+      );
+
+
+    const blockNumber =
+      hexToNumber(
+        block.result
+      );
+
+
+    document
+      .getElementById("blockNumber")
+      .textContent =
+        formatNumber(
+          blockNumber
+        );
+
+
+    /*
+     * LATENCY
+     */
+
+    document
+      .getElementById("latency")
+      .innerHTML =
+        formatLatency(
+          block.latency
+        );
+
+
+    /*
+     * LATEST BLOCK
+     */
+
+    const latest =
+      await rpc(
+        "eth_getBlockByNumber",
+        [
+          "latest",
+          false
+        ]
+      );
+
+
+    const latestBlock =
+      latest.result;
+
+
+    if (latestBlock) {
+
+      const timestamp =
+        hexToNumber(
+          latestBlock.timestamp
+        );
+
+
+      const date =
+        new Date(
+          timestamp * 1000
+        );
+
+
+      document
+        .getElementById("blockTime")
+        .textContent =
+          date.toLocaleTimeString();
+
+
+      /*
+       * BLOCK RATE
+       */
+
+      if (
+        previousBlock !== null &&
+        previousBlock !== blockNumber
+      ) {
+
+        const blockDifference =
+          blockNumber -
+          previousBlock;
+
+
+        const timeDifference =
+          timestamp -
+          previousBlockTime;
+
+
+        if (
+          timeDifference > 0
+        ) {
+
+          const blocksPerMinute =
+            (
+              blockDifference /
+              timeDifference
+            ) * 60;
+
+
+          document
+            .getElementById("blockRate")
+            .textContent =
+              blocksPerMinute
+                .toFixed(2) +
+              " / min";
+
+        }
+
+      }
+
+
+      previousBlock =
+        blockNumber;
+
+
+      previousBlockTime =
+        timestamp;
+
+    }
+
+
+    /*
+     * GAS PRICE
+     */
+
+    const gas =
+      await rpc(
+        "eth_gasPrice"
+      );
+
+
+    const gasWei =
+      BigInt(
+        gas.result
+      );
+
+
+    /*
+     * Avoid Number precision problems.
+     */
+
+    const gasGwei =
+      Number(
+        gasWei
+      ) / 1e9;
+
+
+    document
+      .getElementById("gasPrice")
+      .textContent =
+        gasGwei.toFixed(6) +
+        " Gwei";
+
+
+    /*
+     * CLIENT
+     */
+
+    const client =
+      await rpc(
+        "web3_clientVersion"
+      );
+
+
+    document
+      .getElementById("client")
+      .textContent =
+        client.result;
+
+
+    /*
+     * STATUS
+     */
+
+    statusDot.className =
+      "dot online";
+
+
+    statusText.textContent =
+      "RPC Operational";
+
+
+    document
+      .getElementById("blockMeta")
+      .textContent =
+        "Latest block received successfully";
+
+
+    document
+      .getElementById("lastCheck")
+      .textContent =
+        "Last check: " +
+        new Date()
+          .toLocaleTimeString();
+
+
+    /*
+     * WALLET
+     */
+
+    await updateWallet(
+      blockNumber
+    );
+
+  }
+
+  catch (error) {
+
+    console.error(error);
+
+
+    statusDot.className =
+      "dot offline";
+
+
+    statusText.textContent =
+      "RPC Offline";
+
+
+    document
+      .getElementById("blockMeta")
+      .textContent =
+        error.message;
+
+
+    document
+      .getElementById("lastCheck")
+      .textContent =
+        "Last check failed";
+
+  }
+
+}
+
+
+/*
+ * CHECK WALLET BUTTON
+ */
+
+document
+  .getElementById("checkWallet")
+  .addEventListener(
+    "click",
+    () => {
+
+      const address =
+        walletInput.value
+          .trim();
+
+
+      if (
+        !isValidAddress(address)
+      ) {
+
+        walletStatus.textContent =
+          "Enter a valid 0x wallet address.";
+
+        return;
+
+      }
+
+
+      walletAddress =
+        address;
+
+
+      localStorage.setItem(
+        "arc_wallet",
+        address
+      );
+
+
+      previousWalletBalance =
+        null;
+
+
+      update();
+
+    }
+  );
+
+
+/*
+ * ENTER KEY
+ */
+
+walletInput
+  .addEventListener(
+    "keydown",
+    event => {
+
+      if (
+        event.key === "Enter"
+      ) {
+
+        document
+          .getElementById(
+            "checkWallet"
+          )
+          .click();
+
+      }
+
+    }
+  );
+
+
+/*
+ * INITIAL
+ */
+
+update();
+
+
+/*
+ * EVERY 2 SECONDS
+ */
+
+setInterval(
+  update,
+  2000
+);
+
+</script>
+
+</body>
+</html>
+```
