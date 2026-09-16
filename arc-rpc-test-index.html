@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Arc RPC Status</title>
+
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: #08090c;
+      color: #f5f7fa;
+      font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .container {
+      width: min(1000px, calc(100% - 32px));
+      margin: 60px auto;
+    }
+
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 28px;
+    }
+
+    .title {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .logo {
+      width: 42px;
+      height: 42px;
+      border-radius: 12px;
+      background: #fff;
+      color: #000;
+      display: grid;
+      place-items: center;
+      font-weight: 900;
+      font-size: 18px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 22px;
+    }
+
+    .subtitle {
+      color: #8d939e;
+      font-size: 13px;
+      margin-top: 3px;
+    }
+
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: #8d939e;
+    }
+
+    .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: #555;
+    }
+
+    .dot.online {
+      background: #3ddc84;
+      box-shadow: 0 0 12px #3ddc84;
+    }
+
+    .dot.offline {
+      background: #ff4d67;
+      box-shadow: 0 0 12px #ff4d67;
+    }
+
+    .hero {
+      background: linear-gradient(135deg, #111318, #0d0f13);
+      border: 1px solid #1e222a;
+      border-radius: 18px;
+      padding: 28px;
+      margin-bottom: 16px;
+    }
+
+    .hero-label {
+      color: #8d939e;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      margin-bottom: 8px;
+    }
+
+    .block {
+      font-size: 42px;
+      font-weight: 800;
+      letter-spacing: -1px;
+    }
+
+    .block-meta {
+      margin-top: 8px;
+      color: #777e89;
+      font-size: 13px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+    }
+
+    .card {
+      background: #101217;
+      border: 1px solid #1d2027;
+      border-radius: 15px;
+      padding: 20px;
+      min-height: 115px;
+    }
+
+    .label {
+      color: #777e89;
+      font-size: 12px;
+      margin-bottom: 10px;
+    }
+
+    .value {
+      font-size: 20px;
+      font-weight: 700;
+      word-break: break-word;
+    }
+
+    .small {
+      font-size: 13px;
+      color: #8d939e;
+      margin-top: 5px;
+    }
+
+    .rpc-card {
+      margin-top: 12px;
+      background: #101217;
+      border: 1px solid #1d2027;
+      border-radius: 15px;
+      padding: 20px;
+    }
+
+    .rpc-url {
+      font-family: monospace;
+      color: #dce1e8;
+      word-break: break-all;
+      font-size: 14px;
+    }
+
+    .latency-good {
+      color: #3ddc84;
+    }
+
+    .latency-medium {
+      color: #ffd166;
+    }
+
+    .latency-bad {
+      color: #ff647c;
+    }
+
+    .footer {
+      margin-top: 18px;
+      color: #555b66;
+      font-size: 12px;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    @media (max-width: 700px) {
+      .grid {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .block {
+        font-size: 32px;
+      }
+    }
+
+    @media (max-width: 480px) {
+      .grid {
+        grid-template-columns: 1fr;
+      }
+
+      .container {
+        margin: 30px auto;
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+<div class="container">
+
+  <div class="header">
+    <div class="title">
+      <div class="logo">A</div>
+
+      <div>
+        <h1>Arc RPC Status</h1>
+        <div class="subtitle">Mainnet RPC monitoring</div>
+      </div>
+    </div>
+
+    <div class="status">
+      <div id="statusDot" class="dot"></div>
+      <span id="statusText">Checking...</span>
+    </div>
+  </div>
+
+
+  <div class="hero">
+
+    <div class="hero-label">
+      Current Block
+    </div>
+
+    <div id="blockNumber" class="block">
+      —
+    </div>
+
+    <div id="blockMeta" class="block-meta">
+      Waiting for RPC...
+    </div>
+
+  </div>
+
+
+  <div class="grid">
+
+    <div class="card">
+      <div class="label">Chain ID</div>
+      <div id="chainId" class="value">—</div>
+      <div class="small">Expected: 5042</div>
+    </div>
+
+    <div class="card">
+      <div class="label">RPC Latency</div>
+      <div id="latency" class="value">—</div>
+      <div class="small">eth_blockNumber</div>
+    </div>
+
+    <div class="card">
+      <div class="label">Block Time</div>
+      <div id="blockTime" class="value">—</div>
+      <div class="small">Latest block timestamp</div>
+    </div>
+
+    <div class="card">
+      <div class="label">Block Rate</div>
+      <div id="blockRate" class="value">—</div>
+      <div class="small">Blocks / minute</div>
+    </div>
+
+    <div class="card">
+      <div class="label">Gas Price</div>
+      <div id="gasPrice" class="value">—</div>
+      <div class="small">Current network gas price</div>
+    </div>
+
+    <div class="card">
+      <div class="label">Client</div>
+      <div id="client" class="value">—</div>
+      <div class="small">web3_clientVersion</div>
+    </div>
+
+  </div>
+
+
+  <div class="rpc-card">
+    <div class="label">RPC Endpoint</div>
+    <div id="rpc" class="rpc-url">
+      https://rpc.mainnet.arc.io
+    </div>
+  </div>
+
+
+  <div class="footer">
+    <span>Polling every 2 seconds</span>
+    <span id="lastCheck">Last check: —</span>
+  </div>
+
+</div>
+
+
+<script>
+
+const RPC = "https://rpc.mainnet.arc.io";
+
+let previousBlock = null;
+let previousBlockTime = null;
+let blockHistory = [];
+
+
+async function rpc(method, params = []) {
+
+  const start = performance.now();
+
+  const response = await fetch(RPC, {
+    method: "POST",
+
+    headers: {
+      "Content-Type": "application/json"
+    },
+
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      method,
+      params,
+      id: Date.now()
+    })
+  });
+
+  const latency = performance.now() - start;
+
+  if (!response.ok) {
+    throw new Error("HTTP " + response.status);
+  }
+
+  const data = await response.json();
+
+  if (data.error) {
+    throw new Error(data.error.message || "RPC error");
+  }
+
+  return {
+    result: data.result,
+    latency
+  };
+}
+
+
+function hexToNumber(hex) {
+  return parseInt(hex, 16);
+}
+
+
+function formatNumber(number) {
+  return Number(number).toLocaleString("en-US");
+}
+
+
+function formatLatency(ms) {
+
+  const rounded = Math.round(ms);
+
+  if (rounded < 150)
+    return `<span class="latency-good">${rounded} ms</span>`;
+
+  if (rounded < 400)
+    return `<span class="latency-medium">${rounded} ms</span>`;
+
+  return `<span class="latency-bad">${rounded} ms</span>`;
+}
+
+
+async function update() {
+
+  const statusDot = document.getElementById("statusDot");
+  const statusText = document.getElementById("statusText");
+
+  try {
+
+    /*
+     * CHAIN ID
+     */
+
+    const chain = await rpc("eth_chainId");
+
+    const chainId = hexToNumber(chain.result);
+
+    document.getElementById("chainId").textContent =
+      chainId;
+
+
+    /*
+     * BLOCK NUMBER
+     */
+
+    const block = await rpc("eth_blockNumber");
+
+    const blockNumber = hexToNumber(block.result);
+
+    document.getElementById("blockNumber").textContent =
+      formatNumber(blockNumber);
+
+
+    /*
+     * LATENCY
+     */
+
+    document.getElementById("latency").innerHTML =
+      formatLatency(block.latency);
+
+
+    /*
+     * LATEST BLOCK
+     */
+
+    const latest = await rpc(
+      "eth_getBlockByNumber",
+      ["latest", false]
+    );
+
+    const latestBlock = latest.result;
+
+    if (latestBlock) {
+
+      const timestamp =
+        hexToNumber(latestBlock.timestamp);
+
+      const date =
+        new Date(timestamp * 1000);
+
+      document.getElementById("blockTime").textContent =
+        date.toLocaleTimeString();
+
+
+      /*
+       * BLOCK RATE
+       */
+
+      if (
+        previousBlock !== null &&
+        previousBlock !== blockNumber
+      ) {
+
+        const blockDifference =
+          blockNumber - previousBlock;
+
+        const timeDifference =
+          timestamp - previousBlockTime;
+
+        if (timeDifference > 0) {
+
+          const blocksPerMinute =
+            (blockDifference / timeDifference) * 60;
+
+          document.getElementById("blockRate").textContent =
+            blocksPerMinute.toFixed(2) + " / min";
+        }
+      }
+
+      previousBlock = blockNumber;
+      previousBlockTime = timestamp;
+    }
+
+
+    /*
+     * GAS PRICE
+     */
+
+    const gas = await rpc("eth_gasPrice");
+
+    const gasWei =
+      hexToNumber(gas.result);
+
+    const gasGwei =
+      gasWei / 1e9;
+
+    document.getElementById("gasPrice").textContent =
+      gasGwei.toFixed(4) + " Gwei";
+
+
+    /*
+     * CLIENT
+     */
+
+    const client = await rpc("web3_clientVersion");
+
+    document.getElementById("client").textContent =
+      client.result;
+
+
+    /*
+     * ONLINE
+     */
+
+    statusDot.className = "dot online";
+
+    statusText.textContent =
+      "RPC Operational";
+
+
+    document.getElementById("blockMeta").textContent =
+      "Latest block received successfully";
+
+
+    document.getElementById("lastCheck").textContent =
+      "Last check: " + new Date().toLocaleTimeString();
+
+  }
+
+  catch (error) {
+
+    console.error(error);
+
+    statusDot.className = "dot offline";
+
+    statusText.textContent =
+      "RPC Offline";
+
+    document.getElementById("blockMeta").textContent =
+      error.message;
+
+    document.getElementById("lastCheck").textContent =
+      "Last check failed";
+  }
+
+}
+
+
+/*
+ * INITIAL CHECK
+ */
+
+update();
+
+
+/*
+ * POLL EVERY 2 SECONDS
+ */
+
+setInterval(update, 2000);
+
+</script>
+
+</body>
+</html>
