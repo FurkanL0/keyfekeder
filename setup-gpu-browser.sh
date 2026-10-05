@@ -1,308 +1,225 @@
+cd /workspace
+rm -f setup-gpu-browser.sh
+
+cat > setup-gpu-browser.sh <<'EOF'
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-###############################################################################
-# Headless NVIDIA GPU Browser Server
-#
-# Target:
-#   NVIDIA RTX 4000 / 5000 series
-#   Ubuntu 22.04 / 24.04
-#   Vast.ai / bare-metal / GPU VM
-#
-# Provides:
-#   NVIDIA Xorg :0
-#   1920x1080 virtual display
-#   Chrome GPU acceleration
-#   WebGL / WebGL2 / WebGPU
-#   ANGLE OpenGL backend
-#   x11vnc localhost:5900
-#   noVNC localhost:6080
-#
-# IMPORTANT:
-#   - Does NOT install/upgrade/remove NVIDIA drivers.
-#   - Does NOT touch CUDA.
-#   - Does NOT expose VNC/noVNC publicly.
-###############################################################################
+APP_NAME="gpu-browser"
+BASE_DIR="/opt/${APP_NAME}"
+LOG_DIR="/var/log/${APP_NAME}"
+RUN_DIR="/run/${APP_NAME}"
 
-NAME="gpu-browser"
+DISPLAY_NUM="${DISPLAY_NUM:-0}"
+DISPLAY=":${DISPLAY_NUM}"
 
-DISPLAY_NUM=":0"
-DISPLAY_ID="0"
+VNC_PORT="${VNC_PORT:-5900}"
+NOVNC_PORT="${NOVNC_PORT:-6080}"
 
-SCREEN_WIDTH="1920"
-SCREEN_HEIGHT="1080"
-SCREEN_DEPTH="24"
+SCREEN_WIDTH="${SCREEN_WIDTH:-1920}"
+SCREEN_HEIGHT="${SCREEN_HEIGHT:-1080}"
 
-XORG_CONF="/etc/X11/xorg.conf.d/90-${NAME}.conf"
-LOG_DIR="/var/log/${NAME}"
-RUN_DIR="/run/${NAME}"
-CHROME_DATA="/opt/${NAME}/chrome-profile"
+GPU_INDEX="${GPU_INDEX:-0}"
 
-X11VNC_PORT="5900"
-NOVNC_PORT="6080"
-
-CHROME_BIN="/usr/bin/google-chrome"
-
-###############################################################################
-# Helpers
-###############################################################################
-
-log() {
-    echo
-    echo "============================================================"
-    echo "[${NAME}] $*"
-    echo "============================================================"
-}
-
-ok() {
-    echo "[OK] $*"
-}
-
-warn() {
-    echo "[WARN] $*"
-}
-
-fail() {
-    echo
-    echo "[ERROR] $*"
-    echo
-    exit 1
-}
-
-cleanup_on_error() {
-    echo
-    echo "Setup failed."
-    echo "Check:"
-    echo "  ${LOG_DIR}/xorg.log"
-    echo "  ${LOG_DIR}/x11vnc.log"
-    echo "  ${LOG_DIR}/novnc.log"
-    echo "  journalctl -u ${NAME}-xorg"
-    echo
-}
-
-trap cleanup_on_error ERR
-
-###############################################################################
-# Root
-###############################################################################
-
-if [[ "${EUID}" -ne 0 ]]; then
-    fail "Run as root: sudo bash $0"
-fi
-
-###############################################################################
-# OS detection
-###############################################################################
-
-if [[ ! -f /etc/os-release ]]; then
-    fail "/etc/os-release not found."
-fi
-
-source /etc/os-release
-
-echo
-echo "GPU Browser Server"
-echo "OS:      ${PRETTY_NAME:-unknown}"
-echo "Kernel:  $(uname -r)"
-echo
-
-###############################################################################
-# Directories
-###############################################################################
-
-mkdir -p "${LOG_DIR}"
-mkdir -p "${RUN_DIR}"
-mkdir -p "${CHROME_DATA}"
-
-chmod 700 "${CHROME_DATA}"
-
-###############################################################################
-# NVIDIA detection
-###############################################################################
-
-log "Detecting NVIDIA GPU"
-
-command -v nvidia-smi >/dev/null 2>&1 || \
-    fail "nvidia-smi not found. NVIDIA driver/runtime is not available."
-
-NVIDIA_SMI_VERSION="$(nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -n1 | xargs || true)"
-
-[[ -n "${NVIDIA_SMI_VERSION}" ]] || \
-    fail "NVIDIA driver detected but nvidia-smi could not query driver version."
-
-GPU_COUNT="$(nvidia-smi --query-gpu=count --format=csv,noheader 2>/dev/null | head -n1 | xargs || echo 0)"
-
-GPU_COUNT="${GPU_COUNT:-0}"
-
-if [[ "${GPU_COUNT}" -lt 1 ]]; then
-    fail "No NVIDIA GPU detected."
-fi
-
-GPU_NAME="$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -n1 | xargs)"
-GPU_UUID="$(nvidia-smi --query-gpu=uuid --format=csv,noheader 2>/dev/null | head -n1 | xargs)"
-GPU_PCI="$(nvidia-smi --query-gpu=pci.bus_id --format=csv,noheader 2>/dev/null | head -n1 | xargs)"
-
-echo "GPU:       ${GPU_NAME}"
-echo "Driver:    ${NVIDIA_SMI_VERSION}"
-echo "GPU count: ${GPU_COUNT}"
-echo "UUID:      ${GPU_UUID}"
-echo "PCI:       ${GPU_PCI}"
-
-###############################################################################
-# RTX family sanity check
-###############################################################################
-
-if [[ "${GPU_NAME}" =~ RTX[[:space:]]+(40|50)[0-90-9]* ]]; then
-    ok "RTX 40/50 series detected."
-else
-    warn "GPU is not obviously an RTX 40/50 series."
-    warn "Continuing anyway because NVIDIA Xorg/WebGL may still work."
-fi
-
-###############################################################################
-# Check NVIDIA kernel driver
-###############################################################################
-
-log "Checking NVIDIA kernel driver"
-
-if ! lsmod | grep -q '^nvidia'; then
-    warn "nvidia kernel module is not visible in lsmod."
-    warn "Trying nvidia-smi anyway..."
-fi
-
-nvidia-smi >/dev/null 2>&1 || \
-    fail "nvidia-smi failed. Do not continue."
-
-ok "NVIDIA runtime is operational."
-
-###############################################################################
-# IMPORTANT:
-# Never manipulate NVIDIA packages here.
-###############################################################################
-
-log "Protecting existing NVIDIA installation"
-
-echo "Existing NVIDIA driver: ${NVIDIA_SMI_VERSION}"
-echo "No NVIDIA packages will be installed, upgraded, downgraded or removed."
-
-###############################################################################
-# Convert PCI bus address to Xorg BusID
-#
-# Example:
-#   00000000:5E:00.0
-#
-# Xorg:
-#   PCI:94:0:0
-###############################################################################
-
-log "Converting PCI bus ID"
-
-PCI_CLEAN="${GPU_PCI#00000000:}"
-
-IFS=':' read -r PCI_BUS PCI_REST <<< "${PCI_CLEAN}"
-IFS='.' read -r PCI_DEV PCI_FUNC <<< "${PCI_REST}"
-
-PCI_BUS_DEC=$((16#${PCI_BUS}))
-PCI_DEV_DEC=$((16#${PCI_DEV}))
-PCI_FUNC_DEC=$((16#${PCI_FUNC}))
-
-XORG_BUS_ID="PCI:${PCI_BUS_DEC}:${PCI_DEV_DEC}:${PCI_FUNC_DEC}"
-
-echo "NVIDIA PCI: ${GPU_PCI}"
-echo "Xorg BusID: ${XORG_BUS_ID}"
-
-###############################################################################
-# Packages
-###############################################################################
-
-log "Installing userspace packages"
+XORG_CONF="/etc/X11/xorg.conf.d/90-gpu-browser.conf"
+XORG_LOG="${LOG_DIR}/xorg.log"
 
 export DEBIAN_FRONTEND=noninteractive
 
-apt-get update
+mkdir -p "$LOG_DIR" "$RUN_DIR" "$BASE_DIR"
 
-apt-get install -y \
-    xorg \
-    xserver-xorg-core \
-    xserver-xorg-video-nvidia \
-    x11vnc \
-    novnc \
-    websockify \
-    dbus-x11 \
-    x11-utils \
-    mesa-utils \
-    wget \
-    curl \
-    ca-certificates \
-    pciutils \
-    procps
+log() {
+    printf '\033[1;36m[%s]\033[0m %s\n' "$APP_NAME" "$*"
+}
 
-###############################################################################
-# Chrome
-###############################################################################
+ok() {
+    printf '\033[1;32m[ OK ]\033[0m %s\n' "$*"
+}
 
-log "Checking Google Chrome"
+warn() {
+    printf '\033[1;33m[WARN]\033[0m %s\n' "$*"
+}
 
-if [[ ! -x "${CHROME_BIN}" ]]; then
+die() {
+    printf '\033[1;31m[FAIL]\033[0m %s\n' "$*" >&2
+    exit 1
+}
 
-    echo "Google Chrome not found."
-    echo "Installing stable Chrome..."
+require_root() {
+    [[ $EUID -eq 0 ]] || die "Run this script as root."
+}
 
-    TMP_DEB="/tmp/google-chrome-stable.deb"
+check_nvidia() {
+    log "Checking NVIDIA runtime..."
 
-    rm -f "${TMP_DEB}"
+    command -v nvidia-smi >/dev/null 2>&1 \
+        || die "nvidia-smi not found. NVIDIA driver must already be installed."
+
+    nvidia-smi >/dev/null 2>&1 \
+        || die "nvidia-smi failed. NVIDIA runtime is not healthy."
+
+    GPU_NAME="$(
+        nvidia-smi -i "$GPU_INDEX" \
+        --query-gpu=name \
+        --format=csv,noheader 2>/dev/null |
+        head -n1 |
+        xargs
+    )"
+
+    DRIVER_VERSION="$(
+        nvidia-smi -i "$GPU_INDEX" \
+        --query-gpu=driver_version \
+        --format=csv,noheader 2>/dev/null |
+        head -n1 |
+        xargs
+    )"
+
+    PCI_BUS="$(
+        nvidia-smi -i "$GPU_INDEX" \
+        --query-gpu=pci.bus_id \
+        --format=csv,noheader 2>/dev/null |
+        head -n1 |
+        xargs
+    )"
+
+    [[ -n "$GPU_NAME" ]] \
+        || die "Could not determine GPU name."
+
+    [[ -n "$PCI_BUS" ]] \
+        || die "Could not determine GPU PCI bus ID."
+
+    ok "GPU: ${GPU_NAME}"
+    ok "NVIDIA driver: ${DRIVER_VERSION}"
+    ok "PCI bus: ${PCI_BUS}"
+
+    if [[ "$GPU_NAME" =~ RTX[[:space:]]+(40|50)[0-9]{2} ]]; then
+        ok "RTX 40/50-series GPU detected."
+    else
+        warn "GPU is not recognized as a standard RTX 40/50 model. Continuing anyway."
+    fi
+
+    if [[ -r /sys/module/nvidia_drm/parameters/modeset ]]; then
+        NVIDIA_MODESET="$(cat /sys/module/nvidia_drm/parameters/modeset)"
+
+        if [[ "$NVIDIA_MODESET" == "Y" ]]; then
+            ok "nvidia_drm modeset: Y"
+        else
+            warn "nvidia_drm modeset: ${NVIDIA_MODESET}"
+        fi
+    fi
+
+    NVIDIA_XORG="$(
+        find /usr/lib /usr/lib64 \
+        -type f \
+        -path '*/nvidia/xorg/nvidia_drv.so' \
+        -print \
+        -quit 2>/dev/null || true
+    )"
+
+    [[ -n "$NVIDIA_XORG" ]] \
+        || die "NVIDIA Xorg driver not found. Refusing to modify NVIDIA packages."
+
+    ok "NVIDIA Xorg driver: ${NVIDIA_XORG}"
+}
+
+pci_to_xorg() {
+    log "Converting NVIDIA PCI address to Xorg BusID..."
+
+    local busdev
+    local bus_hex
+    local devfunc
+    local dev_hex
+    local func
+    local bus_dec
+    local dev_dec
+
+    busdev="${PCI_BUS#*:}"
+    bus_hex="${busdev%%:*}"
+
+    devfunc="${busdev#*:}"
+    dev_hex="${devfunc%%.*}"
+    func="${devfunc#*.}"
+
+    bus_dec=$((16#$bus_hex))
+    dev_dec=$((16#$dev_hex))
+
+    XORG_BUSID="PCI:${bus_dec}:${dev_dec}:${func}"
+
+    ok "Xorg BusID: ${XORG_BUSID}"
+}
+
+install_packages() {
+    log "Installing generic X11/browser dependencies..."
+
+    apt-get update
+
+    apt-get install -y \
+        xorg \
+        xserver-xorg-core \
+        x11vnc \
+        dbus-x11 \
+        x11-utils \
+        mesa-utils \
+        ca-certificates \
+        curl \
+        wget \
+        procps \
+        psmisc
+
+    ok "Generic X11 dependencies installed."
+}
+
+install_chrome() {
+    if command -v google-chrome >/dev/null 2>&1; then
+        ok "Chrome: $(google-chrome --version 2>/dev/null | head -n1)"
+        return
+    fi
+
+    log "Google Chrome not found. Installing Chrome Stable..."
+
+    cd /tmp
 
     wget -q \
-        -O "${TMP_DEB}" \
+        -O google-chrome.deb \
         https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
 
-    apt-get install -y "${TMP_DEB}"
+    apt-get install -y ./google-chrome.deb
 
-    rm -f "${TMP_DEB}"
-fi
+    command -v google-chrome >/dev/null 2>&1 \
+        || die "Chrome installation failed."
 
-[[ -x "${CHROME_BIN}" ]] || \
-    fail "Google Chrome installation failed."
+    ok "Chrome: $(google-chrome --version 2>/dev/null | head -n1)"
+}
 
-CHROME_VERSION="$("${CHROME_BIN}" --version 2>/dev/null || true)"
+write_xorg() {
+    log "Preparing headless NVIDIA Xorg configuration..."
 
-ok "Chrome: ${CHROME_VERSION}"
+    mkdir -p /etc/X11/xorg.conf.d
 
-###############################################################################
-# Existing Xorg config backup
-###############################################################################
+    if [[ -f "$XORG_CONF" ]]; then
+        cp -a \
+            "$XORG_CONF" \
+            "${XORG_CONF}.bak.$(date +%Y%m%d-%H%M%S)"
+    fi
 
-log "Preparing Xorg configuration"
-
-if [[ -f "${XORG_CONF}" ]]; then
-    BACKUP="${XORG_CONF}.backup.$(date +%Y%m%d-%H%M%S)"
-    cp -a "${XORG_CONF}" "${BACKUP}"
-    echo "Existing GPU browser config backed up:"
-    echo "  ${BACKUP}"
-fi
-
-###############################################################################
-# Generate NVIDIA headless Xorg config
-###############################################################################
-
-cat > "${XORG_CONF}" <<EOF
+    cat > "$XORG_CONF" <<CFG
 Section "ServerLayout"
-    Identifier "GPUHeadlessLayout"
-    Screen 0 "GPUHeadlessScreen"
+    Identifier "GPUBrowserLayout"
+    Screen 0 "GPUBrowserScreen"
 EndSection
 
 Section "Device"
-    Identifier "GPUHeadlessDevice"
+    Identifier "GPUBrowserDevice"
     Driver "nvidia"
-    BusID "${XORG_BUS_ID}"
+    BusID "${XORG_BUSID}"
 
     Option "AllowEmptyInitialConfiguration" "True"
     Option "UseDisplayDevice" "None"
 EndSection
 
 Section "Screen"
-    Identifier "GPUHeadlessScreen"
-    Device "GPUHeadlessDevice"
+    Identifier "GPUBrowserScreen"
+    Device "GPUBrowserDevice"
 
     DefaultDepth 24
 
@@ -311,252 +228,170 @@ Section "Screen"
         Virtual ${SCREEN_WIDTH} ${SCREEN_HEIGHT}
     EndSubSection
 EndSection
-EOF
+CFG
 
-ok "Xorg config generated:"
-echo "  ${XORG_CONF}"
+    ok "Xorg config written:"
+    echo "    ${XORG_CONF}"
+}
 
-###############################################################################
-# Kill conflicting old processes
-###############################################################################
+stop_previous() {
+    log "Stopping previous GPU browser processes..."
 
-log "Cleaning previous GPU browser processes"
+    for pidfile in "$RUN_DIR"/*.pid; do
+        [[ -f "$pidfile" ]] || continue
 
-pkill -TERM Xorg 2>/dev/null || true
-pkill -TERM x11vnc 2>/dev/null || true
-pkill -TERM websockify 2>/dev/null || true
+        pid="$(cat "$pidfile" 2>/dev/null || true)"
 
-sleep 2
+        if [[ "$pid" =~ ^[0-9]+$ ]]; then
+            if kill -0 "$pid" 2>/dev/null; then
+                kill "$pid" 2>/dev/null || true
+                sleep 1
+                kill -9 "$pid" 2>/dev/null || true
+            fi
+        fi
 
-pkill -KILL Xorg 2>/dev/null || true
-pkill -KILL x11vnc 2>/dev/null || true
-pkill -KILL websockify 2>/dev/null || true
+        rm -f "$pidfile"
+    done
 
-rm -f /tmp/.X0-lock
-rm -f /tmp/.X11-unix/X0
+    if [[ -S "/tmp/.X11-unix/X${DISPLAY_NUM}" ]]; then
+        warn "An X11 display already exists on ${DISPLAY}."
 
-mkdir -p /tmp/.X11-unix
-chmod 1777 /tmp/.X11-unix
+        local xpid
+        xpid="$(
+            pgrep -f \
+            "[X]org .*:${DISPLAY_NUM}([[:space:]]|$)" |
+            head -n1 || true
+        )"
 
-###############################################################################
-# Xorg systemd service
-###############################################################################
+        if [[ -n "$xpid" ]]; then
+            warn "Existing Xorg PID: ${xpid}"
 
-log "Creating Xorg systemd service"
+            if tr '\0' ' ' < "/proc/${xpid}/cmdline" 2>/dev/null |
+                grep -q "$XORG_CONF"; then
 
-cat > "/etc/systemd/system/${NAME}-xorg.service" <<EOF
-[Unit]
-Description=Headless NVIDIA Xorg for GPU Browser
-After=local-fs.target
-Wants=network-online.target
+                log "Existing Xorg appears to belong to this setup."
 
-[Service]
-Type=simple
-User=root
-
-Environment=DISPLAY=${DISPLAY_NUM}
-
-ExecStart=/usr/lib/xorg/Xorg ${DISPLAY_NUM} -config ${XORG_CONF} -noreset -nolisten tcp
-
-Restart=always
-RestartSec=2
-
-StandardOutput=append:${LOG_DIR}/xorg.log
-StandardError=append:${LOG_DIR}/xorg.log
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-systemctl daemon-reload
-systemctl enable "${NAME}-xorg.service"
-
-systemctl restart "${NAME}-xorg.service"
-
-###############################################################################
-# Wait for X
-###############################################################################
-
-log "Waiting for Xorg"
-
-X_READY=0
-
-for i in $(seq 1 30); do
-
-    if [[ -S /tmp/.X11-unix/X0 ]]; then
-        if DISPLAY=:0 xdpyinfo >/dev/null 2>&1; then
-            X_READY=1
-            break
+                kill "$xpid" 2>/dev/null || true
+                sleep 2
+            else
+                warn "Existing Xorg does not appear to be ours."
+                warn "It will NOT be killed."
+            fi
         fi
     fi
+}
 
-    sleep 1
-done
+start_xorg() {
+    log "Starting headless Xorg ${DISPLAY}..."
 
-if [[ "${X_READY}" -ne 1 ]]; then
+    mkdir -p /tmp/.X11-unix
+    chmod 1777 /tmp/.X11-unix
+
+    rm -f "/tmp/.X${DISPLAY_NUM}-lock" 2>/dev/null || true
+
+    XORG_BIN="$(command -v Xorg || true)"
+
+    if [[ -z "$XORG_BIN" ]]; then
+        XORG_BIN="/usr/lib/xorg/Xorg"
+    fi
+
+    [[ -x "$XORG_BIN" ]] \
+        || die "Xorg binary not found."
+
+    nohup "$XORG_BIN" "$DISPLAY" \
+        -config "$XORG_CONF" \
+        -noreset \
+        -nolisten tcp \
+        -logfile "$XORG_LOG" \
+        >/dev/null 2>&1 &
+
+    XORG_PID=$!
+
+    echo "$XORG_PID" > "$RUN_DIR/xorg.pid"
+
+    log "Xorg PID: ${XORG_PID}"
+
+    for _ in $(seq 1 30); do
+
+        if [[ -S "/tmp/.X11-unix/X${DISPLAY_NUM}" ]]; then
+
+            if DISPLAY="$DISPLAY" xdpyinfo >/dev/null 2>&1; then
+                ok "Xorg is ready on ${DISPLAY}."
+                return
+            fi
+        fi
+
+        sleep 1
+    done
 
     echo
-    echo "Xorg failed."
-    echo
-    tail -n 100 "${LOG_DIR}/xorg.log" || true
-    echo
+    echo "========== XORG LOG =========="
+    tail -n 100 "$XORG_LOG" 2>/dev/null || true
+    echo "==============================="
 
-    systemctl status "${NAME}-xorg.service" --no-pager || true
+    die "Xorg failed to start."
+}
 
-    fail "Xorg :0 did not become ready."
-fi
+check_opengl() {
+    log "Checking NVIDIA OpenGL renderer..."
 
-ok "Xorg :0 is running."
+    local vendor
+    local renderer
+    local dimensions
 
-###############################################################################
-# Verify resolution
-###############################################################################
+    dimensions="$(
+        DISPLAY="$DISPLAY" \
+        xdpyinfo 2>/dev/null |
+        awk '/dimensions:/{print $2; exit}'
+    )"
 
-DIMENSIONS="$(DISPLAY=:0 xdpyinfo 2>/dev/null | awk '/dimensions:/ {print $2; exit}')"
+    vendor="$(
+        DISPLAY="$DISPLAY" \
+        glxinfo -B 2>/dev/null |
+        awk -F: '
+            /OpenGL vendor string/ {
+                sub(/^ /,"",$2);
+                print $2;
+                exit
+            }'
+    )"
 
-if [[ "${DIMENSIONS}" != "${SCREEN_WIDTH}x${SCREEN_HEIGHT}" ]]; then
-    warn "Unexpected X resolution: ${DIMENSIONS}"
-else
-    ok "Virtual display: ${DIMENSIONS}"
-fi
+    renderer="$(
+        DISPLAY="$DISPLAY" \
+        glxinfo -B 2>/dev/null |
+        awk -F: '
+            /OpenGL renderer string/ {
+                sub(/^ /,"",$2);
+                print $2;
+                exit
+            }'
+    )"
 
-###############################################################################
-# Verify NVIDIA OpenGL
-###############################################################################
+    [[ -n "$vendor" ]] \
+        || die "Could not query OpenGL vendor."
 
-log "Testing NVIDIA OpenGL"
+    [[ "$vendor" == *NVIDIA* ]] \
+        || die "Xorg is NOT using NVIDIA OpenGL. Vendor: ${vendor}"
 
-GL_RENDERER="$(
-    DISPLAY=:0 glxinfo -B 2>/dev/null |
-    awk -F': ' '/OpenGL renderer string/ {print $2; exit}'
-)"
+    ok "X11 resolution: ${dimensions}"
+    ok "OpenGL vendor: ${vendor}"
+    ok "OpenGL renderer: ${renderer}"
+}
 
-GL_VENDOR="$(
-    DISPLAY=:0 glxinfo -B 2>/dev/null |
-    awk -F': ' '/OpenGL vendor string/ {print $2; exit}'
-)"
+write_chrome_launcher() {
+    log "Creating Chrome launcher..."
 
-echo "OpenGL vendor:   ${GL_VENDOR:-unknown}"
-echo "OpenGL renderer: ${GL_RENDERER:-unknown}"
+    mkdir -p "$BASE_DIR/chrome-profile"
 
-if [[ "${GL_RENDERER}" != *NVIDIA* ]]; then
-    warn "OpenGL renderer does not appear to be NVIDIA."
-    warn "Full glxinfo:"
-    DISPLAY=:0 glxinfo -B || true
-else
-    ok "NVIDIA OpenGL renderer detected."
-fi
-
-###############################################################################
-# x11vnc systemd service
-###############################################################################
-
-log "Creating x11vnc service"
-
-cat > "/etc/systemd/system/${NAME}-x11vnc.service" <<EOF
-[Unit]
-Description=Localhost x11vnc for GPU Browser
-Requires=${NAME}-xorg.service
-After=${NAME}-xorg.service
-
-[Service]
-Type=simple
-User=root
-
-Environment=DISPLAY=${DISPLAY_NUM}
-
-ExecStart=/usr/bin/x11vnc \
-    -display ${DISPLAY_NUM} \
-    -localhost \
-    -forever \
-    -shared \
-    -nopw \
-    -rfbport ${X11VNC_PORT} \
-    -noxdamage
-
-Restart=always
-RestartSec=2
-
-StandardOutput=append:${LOG_DIR}/x11vnc.log
-StandardError=append:${LOG_DIR}/x11vnc.log
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-systemctl daemon-reload
-systemctl enable "${NAME}-x11vnc.service"
-systemctl restart "${NAME}-x11vnc.service"
-
-sleep 2
-
-if ss -lnt | grep -q ":${X11VNC_PORT} "; then
-    ok "x11vnc listening on localhost:${X11VNC_PORT}"
-else
-    warn "x11vnc port ${X11VNC_PORT} not detected."
-fi
-
-###############################################################################
-# noVNC/websockify systemd service
-###############################################################################
-
-log "Creating noVNC service"
-
-NOVNC_WEB="/usr/share/novnc"
-
-if [[ ! -d "${NOVNC_WEB}" ]]; then
-    fail "noVNC web root not found: ${NOVNC_WEB}"
-fi
-
-cat > "/etc/systemd/system/${NAME}-novnc.service" <<EOF
-[Unit]
-Description=noVNC WebSocket proxy for GPU Browser
-Requires=${NAME}-x11vnc.service
-After=${NAME}-x11vnc.service
-
-[Service]
-Type=simple
-User=root
-
-ExecStart=/usr/bin/websockify \
-    --web=${NOVNC_WEB} \
-    ${NOVNC_PORT} \
-    127.0.0.1:${X11VNC_PORT}
-
-Restart=always
-RestartSec=2
-
-StandardOutput=append:${LOG_DIR}/novnc.log
-StandardError=append:${LOG_DIR}/novnc.log
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-systemctl daemon-reload
-systemctl enable "${NAME}-novnc.service"
-systemctl restart "${NAME}-novnc.service"
-
-sleep 2
-
-if ss -lnt | grep -q ":${NOVNC_PORT} "; then
-    ok "noVNC listening on localhost:${NOVNC_PORT}"
-else
-    warn "noVNC port ${NOVNC_PORT} not detected."
-fi
-
-###############################################################################
-# Chrome launcher
-###############################################################################
-
-log "Creating Chrome GPU launcher"
-
-cat > "/usr/local/bin/${NAME}-chrome" <<'EOF'
+    cat > "$BASE_DIR/start-chrome.sh" <<'CHROME'
 #!/usr/bin/env bash
+set -Eeuo pipefail
 
-set -e
+export DISPLAY="${DISPLAY:-:0}"
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp/runtime-root}"
 
-export DISPLAY=:0
+mkdir -p "$XDG_RUNTIME_DIR"
+chmod 700 "$XDG_RUNTIME_DIR" 2>/dev/null || true
 
 exec /usr/bin/google-chrome \
     --no-sandbox \
@@ -571,164 +406,338 @@ exec /usr/bin/google-chrome \
     --enable-webgl \
     --enable-webgl2 \
     --enable-gpu-rasterization \
-    --enable-zero-copy \
-    --enable-native-gpu-memory-buffers \
     --enable-unsafe-webgpu \
     --no-first-run \
     --no-default-browser-check \
-    "$@"
-EOF
+    about:blank
+CHROME
 
-chmod +x "/usr/local/bin/${NAME}-chrome"
+    chmod +x "$BASE_DIR/start-chrome.sh"
 
-ok "Chrome launcher created."
+    ok "Chrome launcher created."
+}
 
-###############################################################################
-# Chrome systemd service
-###############################################################################
+start_process() {
+    local name="$1"
+    local logfile="$2"
+    shift 2
 
-log "Creating Chrome service"
+    local pidfile="$RUN_DIR/${name}.pid"
 
-cat > "/etc/systemd/system/${NAME}-chrome.service" <<EOF
-[Unit]
-Description=Chrome NVIDIA GPU Browser
-Requires=${NAME}-xorg.service
-After=${NAME}-xorg.service
+    nohup "$@" \
+        >> "$logfile" \
+        2>&1 &
 
-[Service]
-Type=simple
-User=root
+    local pid=$!
 
-Environment=DISPLAY=${DISPLAY_NUM}
+    echo "$pid" > "$pidfile"
 
-ExecStart=/usr/local/bin/${NAME}-chrome about:blank
+    sleep 1
 
-Restart=on-failure
-RestartSec=5
+    if kill -0 "$pid" 2>/dev/null; then
+        ok "${name} started (PID ${pid})."
+    else
+        echo
+        echo "========== ${name} LOG =========="
+        tail -n 80 "$logfile" 2>/dev/null || true
+        echo "=================================="
 
-StandardOutput=append:${LOG_DIR}/chrome.log
-StandardError=append:${LOG_DIR}/chrome.log
+        die "${name} failed to start."
+    fi
+}
 
-[Install]
-WantedBy=multi-user.target
-EOF
+start_x11vnc() {
+    log "Starting x11vnc..."
 
-systemctl daemon-reload
-systemctl enable "${NAME}-chrome.service"
+    start_process \
+        x11vnc \
+        "$LOG_DIR/x11vnc.log" \
+        x11vnc \
+        -display "$DISPLAY" \
+        -localhost \
+        -forever \
+        -shared \
+        -nopw \
+        -noxdamage \
+        -rfbport "$VNC_PORT"
+}
 
-###############################################################################
-# GPU smoke tests
-###############################################################################
+start_novnc() {
+    log "Starting noVNC/websockify..."
 
-log "Running GPU smoke tests"
+    if command -v websockify >/dev/null 2>&1; then
+
+        start_process \
+            novnc \
+            "$LOG_DIR/novnc.log" \
+            websockify \
+            --web=/usr/share/novnc/ \
+            "$NOVNC_PORT" \
+            "127.0.0.1:${VNC_PORT}"
+
+        return
+    fi
+
+    local proxy=""
+
+    proxy="$(command -v novnc_proxy 2>/dev/null || true)"
+
+    if [[ -z "$proxy" ]]; then
+        proxy="$(
+            find /usr/share/novnc \
+                -type f \
+                -name novnc_proxy \
+                -print \
+                -quit 2>/dev/null || true
+        )"
+    fi
+
+    if [[ -n "$proxy" ]]; then
+
+        start_process \
+            novnc \
+            "$LOG_DIR/novnc.log" \
+            "$proxy" \
+            --listen "127.0.0.1:${NOVNC_PORT}" \
+            --vnc "127.0.0.1:${VNC_PORT}"
+
+        return
+    fi
+
+    warn "websockify/novnc_proxy not found."
+
+    apt-get install -y python3-websockify
+
+    command -v websockify >/dev/null 2>&1 \
+        || die "Could not install websockify."
+
+    start_process \
+        novnc \
+        "$LOG_DIR/novnc.log" \
+        websockify \
+        --web=/usr/share/novnc/ \
+        "$NOVNC_PORT" \
+        "127.0.0.1:${VNC_PORT}"
+}
+
+start_chrome() {
+    log "Starting Chrome with ANGLE OpenGL..."
+
+    if pgrep -f \
+        '[g]oogle-chrome.*--user-data-dir=/opt/gpu-browser/chrome-profile' \
+        >/dev/null 2>&1; then
+
+        warn "GPU Chrome is already running."
+        return
+    fi
+
+    start_process \
+        chrome \
+        "$LOG_DIR/chrome.log" \
+        env \
+        DISPLAY="$DISPLAY" \
+        "$BASE_DIR/start-chrome.sh"
+}
+
+write_status_command() {
+    log "Installing status command..."
+
+    cat > "$BASE_DIR/status.sh" <<'STATUS'
+#!/usr/bin/env bash
+
+BASE_DIR="/opt/gpu-browser"
+RUN_DIR="/run/gpu-browser"
+DISPLAY=":0"
 
 echo
-echo "---- X DISPLAY ----"
-
-DISPLAY=:0 xdpyinfo | grep -E \
-    'dimensions:|depth of root window' || true
-
-echo
-echo "---- NVIDIA OPENGL ----"
-
-DISPLAY=:0 glxinfo -B 2>/dev/null |
-    grep -E \
-    'OpenGL vendor|OpenGL renderer|OpenGL version|OpenGL core profile version' \
-    || true
+echo "============================================================"
+echo " GPU BROWSER STATUS"
+echo "============================================================"
 
 echo
-echo "---- NVIDIA SMI ----"
+echo "[ NVIDIA ]"
 
 nvidia-smi \
-    --query-gpu=name,driver_version,memory.total,utilization.gpu \
-    --format=csv,noheader
+    --query-gpu=name,driver_version,pci.bus_id,temperature.gpu,utilization.gpu,memory.used,memory.total \
+    --format=csv,noheader 2>/dev/null || true
 
-###############################################################################
-# Start Chrome
-###############################################################################
+echo
+echo "[ XORG ]"
 
-log "Starting Chrome"
+if DISPLAY="$DISPLAY" xdpyinfo >/dev/null 2>&1; then
 
-systemctl restart "${NAME}-chrome.service"
+    DISPLAY="$DISPLAY" xdpyinfo |
+        grep dimensions ||
+        true
 
-sleep 8
+    DISPLAY="$DISPLAY" glxinfo -B 2>/dev/null |
+        grep -E \
+        'OpenGL vendor|OpenGL renderer|OpenGL version' ||
+        true
 
-if systemctl is-active --quiet "${NAME}-chrome.service"; then
-    ok "Chrome service is running."
 else
-    warn "Chrome service failed to stay running."
-    systemctl status "${NAME}-chrome.service" --no-pager || true
+
+    echo "Xorg :0 is NOT responding."
+
 fi
 
-###############################################################################
-# Final status
-###############################################################################
-
-log "Final status"
-
 echo
-systemctl --no-pager --type=service \
-    --state=running |
-    grep -E \
-    "${NAME}-(xorg|x11vnc|novnc|chrome)" \
-    || true
+echo "[ PROCESSES ]"
 
-echo
-echo "GPU:"
-echo "  ${GPU_NAME}"
+for pidfile in "$RUN_DIR"/*.pid; do
 
-echo
-echo "Driver:"
-echo "  ${NVIDIA_SMI_VERSION}"
+    [[ -f "$pidfile" ]] || continue
 
-echo
-echo "Xorg:"
-echo "  DISPLAY=:0"
-echo "  Resolution: ${SCREEN_WIDTH}x${SCREEN_HEIGHT}"
+    name="$(basename "$pidfile" .pid)"
+    pid="$(cat "$pidfile" 2>/dev/null || true)"
+
+    if [[ "$pid" =~ ^[0-9]+$ ]] &&
+       kill -0 "$pid" 2>/dev/null; then
+
+        echo "${name}: RUNNING (PID ${pid})"
+
+    else
+
+        echo "${name}: STOPPED"
+
+    fi
+
+done
 
 echo
-echo "Chrome:"
-echo "  ${CHROME_BIN}"
-echo "  ${CHROME_VERSION}"
+echo "[ PORTS ]"
+
+ss -ltn 2>/dev/null |
+    grep -E ':(5900|6080)\b' ||
+    true
 
 echo
-echo "ANGLE:"
-echo "  OpenGL"
+echo "[ LOGS ]"
 
-echo
-echo "VNC:"
-echo "  localhost:${X11VNC_PORT}"
-
-echo
-echo "noVNC:"
-echo "  http://127.0.0.1:${NOVNC_PORT}/vnc.html"
-
-echo
-echo "SSH tunnel from your PC:"
-echo
-echo "  ssh -L ${NOVNC_PORT}:127.0.0.1:${NOVNC_PORT} -p YOUR_SSH_PORT root@YOUR_SERVER_IP"
-echo
-echo "Then open:"
-echo
-echo "  http://127.0.0.1:${NOVNC_PORT}/vnc.html"
-echo
-
-echo "Logs:"
-echo "  ${LOG_DIR}/xorg.log"
-echo "  ${LOG_DIR}/x11vnc.log"
-echo "  ${LOG_DIR}/novnc.log"
-echo "  ${LOG_DIR}/chrome.log"
-
-echo
-echo "Useful commands:"
-echo "  nvidia-smi"
-echo "  watch -n 1 nvidia-smi"
-echo "  systemctl status ${NAME}-xorg"
-echo "  systemctl status ${NAME}-chrome"
-echo "  journalctl -u ${NAME}-xorg -f"
-echo "  tail -f ${LOG_DIR}/chrome.log"
+echo "${BASE_DIR}"
+echo "/var/log/gpu-browser/xorg.log"
+echo "/var/log/gpu-browser/x11vnc.log"
+echo "/var/log/gpu-browser/novnc.log"
+echo "/var/log/gpu-browser/chrome.log"
 
 echo
 echo "============================================================"
-echo " GPU BROWSER SERVER READY"
-echo "============================================================"
+STATUS
+
+    chmod +x "$BASE_DIR/status.sh"
+
+    ln -sf \
+        "$BASE_DIR/status.sh" \
+        /usr/local/bin/gpu-browser-status
+
+    ok "Installed: gpu-browser-status"
+}
+
+main() {
+
+    require_root
+
+    echo
+    echo "============================================================"
+    echo "       HEADLESS NVIDIA GPU BROWSER - VAST.AI"
+    echo "============================================================"
+    echo
+    echo " Display       : ${DISPLAY}"
+    echo " Resolution    : ${SCREEN_WIDTH}x${SCREEN_HEIGHT}"
+    echo " VNC           : localhost:${VNC_PORT}"
+    echo " noVNC         : localhost:${NOVNC_PORT}"
+    echo " GPU index     : ${GPU_INDEX}"
+    echo
+    echo " NVIDIA driver will NOT be replaced."
+    echo " systemd is NOT required."
+    echo "============================================================"
+    echo
+
+    check_nvidia
+
+    pci_to_xorg
+
+    install_packages
+
+    install_chrome
+
+    write_xorg
+
+    stop_previous
+
+    start_xorg
+
+    check_opengl
+
+    write_chrome_launcher
+
+    start_x11vnc
+
+    start_novnc
+
+    start_chrome
+
+    write_status_command
+
+    sleep 3
+
+    echo
+    echo "============================================================"
+    echo "              GPU BROWSER IS READY"
+    echo "============================================================"
+    echo
+
+    ok "GPU: ${GPU_NAME}"
+    ok "Driver: ${DRIVER_VERSION}"
+    ok "Xorg: ${DISPLAY}"
+    ok "Resolution: ${SCREEN_WIDTH}x${SCREEN_HEIGHT}"
+    ok "Chrome: ANGLE OpenGL"
+    ok "WebGL: enabled"
+    ok "WebGL2: enabled"
+    ok "WebGPU: enabled"
+
+    echo
+    echo "VNC:"
+    echo "  localhost:${VNC_PORT}"
+
+    echo
+    echo "noVNC:"
+    echo "  http://127.0.0.1:${NOVNC_PORT}/vnc.html"
+
+    echo
+    echo "SSH tunnel from your own PC:"
+    echo
+    echo "  ssh -L ${NOVNC_PORT}:127.0.0.1:${NOVNC_PORT} -p YOUR_SSH_PORT root@YOUR_SERVER_IP"
+    echo
+    echo "Then open:"
+    echo
+    echo "  http://127.0.0.1:${NOVNC_PORT}/vnc.html"
+
+    echo
+    echo "Chrome GPU diagnostics:"
+    echo
+    echo "  chrome://gpu"
+
+    echo
+    echo "Status:"
+    echo
+    echo "  gpu-browser-status"
+
+    echo
+    echo "Logs:"
+    echo
+    echo "  ${LOG_DIR}/xorg.log"
+    echo "  ${LOG_DIR}/x11vnc.log"
+    echo "  ${LOG_DIR}/novnc.log"
+    echo "  ${LOG_DIR}/chrome.log"
+
+    echo
+    echo "============================================================"
+}
+
+main "$@"
+EOF
+
+chmod +x setup-gpu-browser.sh
+bash -n setup-gpu-browser.sh
+echo "SCRIPT SYNTAX: OK"
