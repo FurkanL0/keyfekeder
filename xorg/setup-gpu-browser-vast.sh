@@ -280,7 +280,7 @@ start_xorg() {
     info "$(tr 'Xorg başlatılıyor...' 'Starting Xorg...')"
     nohup "$XORG_BIN" "$DISPLAY" -config "$XORG_CONF" -noreset -nolisten tcp -logfile "$XORG_LOG" >/dev/null 2>&1 &
     echo $! > "$XORG_PID"
-    for _ in {1..30}; do DISPLAY="$DISPLAY" xdpyinfo >/dev/null 2>&1 && { ok "Xorg: $WIDTHx$HEIGHT"; return; }; sleep 1; done
+    for _ in {1..30}; do DISPLAY="$DISPLAY" xdpyinfo >/dev/null 2>&1 && { ok "Xorg: ${WIDTH}x${HEIGHT}"; return; }; sleep 1; done
     die "$(tr "Xorg başlatılamadı. Log: $XORG_LOG" "Xorg failed to start. Log: $XORG_LOG")"
 }
 
@@ -446,7 +446,7 @@ verify() {
     info "$(tr 'Son sağlık kontrolleri yapılıyor...' 'Running final health checks...')"
     sleep 3
     DISPLAY="$DISPLAY" xdpyinfo >/dev/null 2>&1 || die 'Xorg health check failed.'
-    ok "Xorg: $WIDTHx$HEIGHT"
+    ok "Xorg: ${WIDTH}x${HEIGHT}"
     DISPLAY="$DISPLAY" glxinfo -B 2>/dev/null | grep -q 'NVIDIA Corporation' || die "$(tr 'NVIDIA OpenGL aktif değil.' 'NVIDIA OpenGL is not active.')"
     ok 'NVIDIA OpenGL active'
     ss -ltn 2>/dev/null | grep -q "127.0.0.1:$VNC_PORT" || die 'VNC port check failed.'
